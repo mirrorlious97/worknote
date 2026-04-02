@@ -27,7 +27,8 @@ import {
   Music,
   Camera,
   Edit3,
-  ChevronRight
+  ChevronRight,
+  Menu
 } from 'lucide-react';
 
 // 图标映射表：扩展了更多可选头像
@@ -177,6 +178,10 @@ export default function App() {
   const [pastStates, setPastStates] = useState([]);
   const textSnapshotRef = useRef(null);
   const [toastMessage, setToastMessage] = useState(null);
+  
+  // --- 移动端抽屉控制状态 ---
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
 
   const [notebooks, setNotebooks] = useState([{ id: 'nb1', name: 'Mirrorli 的笔记本' }]);
   const [activeNotebookId, setActiveNotebookId] = useState('nb1');
@@ -324,6 +329,7 @@ export default function App() {
     setNotesData(prev => [newNote, ...(prev || [])]);
     setActiveNoteId(newNote.id);
     setTimeout(() => startEditing(newNote.id, ''), 100);
+    setIsLeftSidebarOpen(false); // 手机端创建后自动收起侧边栏
   };
 
   const deleteNote = (noteId) => {
@@ -421,21 +427,21 @@ export default function App() {
 
   return (
     <div 
-      className="flex h-screen bg-white text-slate-800 font-sans overflow-hidden relative select-none"
-      onContextMenu={(e) => { if (e.clientX < 256) openContextMenu(e, 'empty', null); }}
-      onTouchStart={(e) => { if (e.touches[0].clientX < 256) handleTouchStart(e, 'empty', null); }}
+      className="flex h-screen bg-white text-slate-800 font-sans overflow-hidden relative select-none w-full"
+      onContextMenu={(e) => { if (e.clientX < 256 && window.innerWidth >= 768) openContextMenu(e, 'empty', null); }}
+      onTouchStart={(e) => { if (e.touches[0].clientX < 256 && window.innerWidth >= 768) handleTouchStart(e, 'empty', null); }}
       onTouchEnd={handleTouchEnd}
     >
       
       {/* 撤销提示 Toast */}
-      <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-5 py-2.5 rounded-full shadow-lg text-sm z-[100] transition-all duration-300 ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+      <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-5 py-2.5 rounded-full shadow-lg text-sm z-[200] transition-all duration-300 ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
         {toastMessage}
       </div>
 
       {/* 自定义右键菜单层 */}
       {contextMenu && (
         <div 
-          className="fixed bg-white border border-slate-200 rounded-lg shadow-xl z-[200] py-1.5 w-48 text-sm"
+          className="fixed bg-white border border-slate-200 rounded-lg shadow-xl z-[300] py-1.5 w-48 text-sm"
           style={{ left: Math.min(contextMenu.x, window.innerWidth - 200), top: Math.min(contextMenu.y, window.innerHeight - 250) }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -529,8 +535,18 @@ export default function App() {
         </div>
       )}
 
+      {/* --- 手机端抽屉遮罩 (左) --- */}
+      {isLeftSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 md:hidden" 
+          onClick={() => setIsLeftSidebarOpen(false)}
+        />
+      )}
+
       {/* 1. 左侧导航：公司与文件夹 */}
-      <div className="w-64 bg-slate-50 border-r border-slate-200 flex flex-col z-10 select-none">
+      <div 
+        className={`absolute inset-y-0 left-0 md:relative flex-shrink-0 w-64 bg-slate-50 border-r border-slate-200 flex flex-col z-50 select-none transform transition-transform duration-300 ${isLeftSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'} md:translate-x-0 md:shadow-none`}
+      >
         <div className="p-4 border-b border-slate-200">
           <div className="relative z-50">
             <div 
@@ -573,7 +589,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-2 px-1">
+        <div className="flex-1 overflow-y-auto py-2 px-1 pb-10">
           {workspaces.map(ws => {
             const IconComponent = IconMap[ws.iconType] || FolderPlus;
             const isDragOver = draggedNoteId && safeNotesData.find(n => n.id === draggedNoteId)?.workspaceId !== ws.id;
@@ -594,7 +610,10 @@ export default function App() {
                     } else {
                       setActiveWorkspace(ws.id); 
                       const firstNote = getSortedNotes(ws.id)[0]; 
-                      if (firstNote) setActiveNoteId(firstNote.id); 
+                      if (firstNote) {
+                        setActiveNoteId(firstNote.id);
+                        setIsLeftSidebarOpen(false); // 手机端点选后自动收起
+                      }
                     }
                   }}
                   onContextMenu={(e) => openContextMenu(e, 'workspace', ws.id)}
@@ -630,6 +649,7 @@ export default function App() {
                             startEditing(note.id, note.title);
                           } else {
                             setActiveNoteId(note.id);
+                            setIsLeftSidebarOpen(false); // 手机端点选后自动收起
                           }
                         }}
                         onContextMenu={(e) => openContextMenu(e, 'note', note.id)}
@@ -673,18 +693,33 @@ export default function App() {
       </div>
 
       {/* 2. 中间主区域：文档与任务编辑器 */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white z-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-white z-0 relative w-full">
         {currentNote ? (
           <>
-            <div className="h-14 border-b border-slate-100 flex items-center justify-between px-8 relative">
-              <div className="text-xs text-slate-400">最后更新于 {currentNote.updatedAt}</div>
+            {/* 顶部工具栏适配了移动端呼出按钮 */}
+            <div className="h-14 border-b border-slate-100 flex items-center justify-between px-4 md:px-8 relative bg-white z-10 shrink-0">
+              <div className="flex items-center gap-3">
+                <button onClick={() => setIsLeftSidebarOpen(true)} className="md:hidden p-1.5 text-slate-400 hover:bg-slate-100 rounded-md transition-colors">
+                  <Menu size={20} />
+                </button>
+                <div className="text-xs text-slate-400 hidden sm:block">最后更新于 {currentNote.updatedAt}</div>
+              </div>
               <div className="flex items-center gap-2">
                 <button 
                   onClick={handleUndo}
                   title="撤销 (Ctrl+Z)"
                   disabled={pastStates.length === 0}
-                  className={`text-sm px-3 py-1.5 rounded-md transition-colors ${pastStates.length > 0 ? 'text-slate-500 hover:bg-slate-100 cursor-pointer' : 'text-slate-300 cursor-not-allowed'}`}
+                  className={`text-sm px-2 py-1.5 md:px-3 md:py-1.5 rounded-md transition-colors ${pastStates.length > 0 ? 'text-slate-500 hover:bg-slate-100 cursor-pointer' : 'text-slate-300 cursor-not-allowed'}`}
                 >撤销</button>
+                
+                <button 
+                  onClick={() => setIsRightSidebarOpen(true)} 
+                  className="md:hidden relative p-1.5 text-slate-400 hover:bg-slate-100 rounded-md transition-colors"
+                >
+                  <Bell size={20} />
+                  {allPendingTasks.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white" />}
+                </button>
+
                 <div className="relative">
                   <button onClick={() => setIsNoteMenuOpen(!isNoteMenuOpen)} className={`p-1.5 rounded-md transition-colors ${isNoteMenuOpen ? 'bg-slate-200 text-slate-800' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
                     <MoreVertical size={18} />
@@ -707,23 +742,23 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-8 py-10 max-w-3xl mx-auto w-full">
+            <div className="flex-1 overflow-y-auto px-5 py-6 md:px-8 md:py-10 max-w-3xl mx-auto w-full">
               <input 
                 type="text" value={currentNote.title} onChange={(e) => updateNoteField(currentNote.id, 'title', e.target.value)}
                 onFocus={handleTextFocus} onBlur={handleTextBlur}
-                className="w-full text-3xl font-semibold text-slate-800 border-none outline-none mb-6 bg-transparent placeholder-slate-300" placeholder="无标题文档"
+                className="w-full text-2xl md:text-3xl font-semibold text-slate-800 border-none outline-none mb-6 bg-transparent placeholder-slate-300" placeholder="无标题文档"
               />
               <textarea 
                 value={currentNote.content} onChange={(e) => updateNoteField(currentNote.id, 'content', e.target.value)}
                 onFocus={handleTextFocus} onBlur={handleTextBlur}
-                className="w-full min-h-[120px] text-slate-600 leading-relaxed resize-none outline-none bg-transparent mb-8" placeholder="在这里记录想法、会议纪要或需求细节..."
+                className="w-full min-h-[120px] text-base md:text-lg text-slate-600 leading-relaxed resize-none outline-none bg-transparent mb-8" placeholder="在这里记录想法、会议纪要或需求细节..."
               />
 
-              <div className="mt-8">
+              <div className="mt-8 pb-10 md:pb-0">
                 <div className="flex items-center gap-2 mb-4 text-slate-800 font-medium"><CheckCircle2 size={18} className="text-slate-400" /><span>本质任务清单 (To-Do)</span></div>
                 <div className="space-y-2">
                   {(currentNote.tasks || []).map(task => (
-                    <div key={task.id} className="flex items-center group gap-3 p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all">
+                    <div key={task.id} className="flex items-center group gap-2 md:gap-3 p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all">
                       <button onClick={() => toggleTask(currentNote.id, task.id)} className="focus:outline-none shrink-0">
                         {task.completed ? <CheckCircle2 size={18} className="text-blue-500" /> : <Circle size={18} className="text-slate-300 group-hover:text-slate-400" />}
                       </button>
@@ -732,10 +767,10 @@ export default function App() {
                         onFocus={handleTextFocus} onBlur={handleTextBlur}
                         className={`flex-1 bg-transparent border-none outline-none text-sm ${task.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}
                       />
-                      <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-100 rounded text-xs text-slate-500 cursor-pointer hover:bg-slate-200 transition-colors shrink-0">
-                        <Calendar size={12} /> {task.deadline}
+                      <div className="flex items-center gap-1 px-1.5 py-1 md:gap-1.5 md:px-2 bg-slate-100 rounded text-xs text-slate-500 cursor-pointer hover:bg-slate-200 transition-colors shrink-0">
+                        <Calendar size={12} /> {task.deadline.slice(5)} {/* 手机上略微精简日期显示 */}
                       </div>
-                      <button onClick={() => deleteTask(currentNote.id, task.id)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-all shrink-0"><Trash2 size={14} /></button>
+                      <button onClick={() => deleteTask(currentNote.id, task.id)} className="opacity-0 md:group-hover:opacity-100 p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-all shrink-0"><Trash2 size={14} /></button>
                     </div>
                   ))}
                   
@@ -744,7 +779,7 @@ export default function App() {
                     <input 
                       type="text" value={newTaskText} onChange={(e) => setNewTaskText(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addTask(currentNote.id); } }}
-                      placeholder="输入完毕按 Enter 或点击 + 号添加新待办..." className="bg-transparent border-none outline-none flex-1 text-sm text-slate-700 placeholder-slate-400"
+                      placeholder="输入完毕按 Enter 添加新待办..." className="bg-transparent border-none outline-none flex-1 text-sm text-slate-700 placeholder-slate-400"
                     />
                   </div>
                 </div>
@@ -752,17 +787,31 @@ export default function App() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-slate-400">左侧还没有文档，点击「新建文档...」开始记录</div>
+          <div className="flex-1 flex items-center justify-center text-slate-400 relative">
+            <button onClick={() => setIsLeftSidebarOpen(true)} className="absolute top-4 left-4 md:hidden p-2 bg-slate-100 rounded-lg"><Menu size={20}/></button>
+            左侧还没有文档，点击「新建文档...」开始记录
+          </div>
         )}
       </div>
 
-      <div className="w-80 bg-slate-50 border-l border-slate-200 flex flex-col shadow-[inset_1px_0_0_0_rgba(0,0,0,0.02)] z-10">
-        <div className="p-5 border-b border-slate-200 flex items-center gap-2 bg-white z-10">
+      {/* --- 手机端抽屉遮罩 (右) --- */}
+      {isRightSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 md:hidden" 
+          onClick={() => setIsRightSidebarOpen(false)}
+        />
+      )}
+
+      {/* 右侧提醒栏 */}
+      <div 
+        className={`absolute inset-y-0 right-0 md:relative flex-shrink-0 w-80 bg-slate-50 border-l border-slate-200 flex flex-col shadow-[inset_1px_0_0_0_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 ${isRightSidebarOpen ? 'translate-x-0 shadow-[0_0_40px_rgba(0,0,0,0.1)]' : 'translate-x-full'} md:translate-x-0 md:shadow-none`}
+      >
+        <div className="p-5 border-b border-slate-200 flex items-center gap-2 bg-white z-10 shrink-0">
           <Bell size={18} className="text-blue-600" />
           <span className="font-semibold text-slate-800 text-sm">即将到来 (提醒)</span>
           <span className="ml-auto bg-blue-100 text-blue-700 text-xs py-0.5 px-2 rounded-full font-medium">{allPendingTasks.length}</span>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-10">
           {allPendingTasks.length > 0 ? (
             allPendingTasks.map(task => (
               <SwipeableTask key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} isUrgent={task.deadline === new Date().toISOString().split('T')[0]} />
