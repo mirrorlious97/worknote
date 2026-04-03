@@ -9,6 +9,7 @@ import {
   Plus, 
   MoreVertical,
   Briefcase,
+  ChevronDown,
   Search,
   Trash2,
   Share,
@@ -32,7 +33,7 @@ import {
   Undo,
   LayoutList,
   ChevronUp,
-  ChevronDown
+  ChevronDown as ChevronDownIcon
 } from 'lucide-react';
 
 // 图标映射表
@@ -51,7 +52,7 @@ const IconMap = {
 
 const AVAILABLE_ICONS = Object.keys(IconMap);
 
-// --- 自动撑开高度的无缝文本框 (模拟 Word 体验) ---
+// --- 自动撑开高度的无缝文本框 (用于合并长文视图) ---
 const AutoResizeTextarea = ({ value, onChange, className, ...props }) => {
   const ref = useRef(null);
   
@@ -75,7 +76,34 @@ const AutoResizeTextarea = ({ value, onChange, className, ...props }) => {
   );
 };
 
-// --- 可右滑删除的任务组件 ---
+// --- 稳定的原生日期选择按钮 ---
+const DatePickerButton = ({ value, onChange, className }) => {
+  const inputRef = useRef(null);
+  return (
+    <div 
+      className={`relative overflow-hidden cursor-pointer ${className}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (inputRef.current) {
+          try { inputRef.current.showPicker(); } catch (err) {}
+        }
+      }}
+    >
+      <Calendar size={12} className="print:hidden pointer-events-none"/> 
+      <span className="pointer-events-none">{value.slice(5)}</span>
+      <input 
+        ref={inputRef}
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onClick={e => e.stopPropagation()}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+      />
+    </div>
+  );
+};
+
+// --- 可右滑删除的任务组件 (右侧提醒栏使用) ---
 const SwipeableTask = ({ task, onToggle, onDelete, onUpdateDeadline, isUrgent }) => {
   const [offsetX, setOffsetX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -135,20 +163,11 @@ const SwipeableTask = ({ task, onToggle, onDelete, onUpdateDeadline, isUrgent })
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-slate-800 mb-1 leading-snug whitespace-pre-wrap pointer-events-none">{task.text}</div>
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span 
-                className={`relative flex items-center gap-1 font-medium cursor-pointer rounded px-1 -ml-1 hover:bg-slate-100 transition-colors ${isUrgent ? 'text-red-500' : 'text-slate-500'}`}
-                onPointerDown={e => e.stopPropagation()}
-              >
-                <Calendar size={12} className="pointer-events-none" />
-                <span className="pointer-events-none">{task.deadline}</span>
-                <input 
-                  type="date"
-                  value={task.deadline}
-                  onChange={(e) => onUpdateDeadline && onUpdateDeadline(task.noteId, task.id, e.target.value)}
-                  onClick={(e) => { try { e.target.showPicker(); } catch(err) {} }}
-                  className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
-                />
-              </span>
+              <DatePickerButton 
+                value={task.deadline}
+                onChange={(newDate) => onUpdateDeadline && onUpdateDeadline(task.noteId, task.id, newDate)}
+                className={`flex items-center gap-1 font-medium rounded px-1 -ml-1 hover:bg-slate-100 transition-colors ${isUrgent ? 'text-red-500' : 'text-slate-500'}`}
+              />
               <span className="text-slate-300 pointer-events-none">|</span>
               <span className="text-slate-500 truncate flex items-center gap-1 pointer-events-none">
                 <FileText size={12} />
@@ -162,11 +181,14 @@ const SwipeableTask = ({ task, onToggle, onDelete, onUpdateDeadline, isUrgent })
   );
 };
 
-// --- Mock Data ---
+// --- 预设初始数据 ---
 const initialData = {
+  notebooks: [
+    { id: 'nb1', name: 'Mirrorli 的笔记本' }
+  ],
   workspaces: [
-    { id: 'w1', name: 'A 科技公司 (驻场)', iconType: 'building', sortOrder: 'time' },
-    { id: 'w2', name: 'B 银行 (外包)', iconType: 'briefcase', sortOrder: 'time' },
+    { id: 'w1', notebookId: 'nb1', name: 'A 科技公司 (驻场)', iconType: 'building', sortOrder: 'time' },
+    { id: 'w2', notebookId: 'nb1', name: 'B 银行 (外包)', iconType: 'briefcase', sortOrder: 'time' },
   ],
   notes: [
     {
@@ -192,22 +214,100 @@ const initialData = {
 };
 
 export default function App() {
+  const [notebooks, setNotebooks] = useState(() => {
+    const saved = localStorage.getItem('my_notes_notebooks');
+    return saved ? JSON.parse(saved) : initialData.notebooks;
+  });
+
   const [workspaces, setWorkspaces] = useState(() => {
     const saved = localStorage.getItem('my_notes_workspaces');
-    return saved ? JSON.parse(saved) : initialData.workspaces;
+    let parsed = saved ? JSON.parse(saved) : initialData.workspaces;
+    return parsed.map(ws => ws.notebookId ? ws : { ...ws, notebookId: notebooks[0]?.id || 'nb1' });
   });
+
   const [notesData, setNotesData] = useState(() => {
     const saved = localStorage.getItem('my_notes_data');
     return saved ? JSON.parse(saved) : initialData.notes;
   });
   
-  const [activeWorkspace, setActiveWorkspace] = useState(workspaces[0]?.id || 'w1');
-  const [activeNoteId, setActiveNoteId] = useState(notesData[0]?.id || 'n1');
+  const [activeNotebookId, setActiveNotebookId] = useState(notebooks[0]?.id || 'nb1');
+  const currentNotebookWorkspaces = workspaces.filter(w => w.notebookId === activeNotebookId);
+  const [activeWorkspace, setActiveWorkspace] = useState(currentNotebookWorkspaces[0]?.id || null);
+  const [activeNoteId, setActiveNoteId] = useState(null);
   const [newTaskText, setNewTaskText] = useState('');
-  
   const [searchQuery, setSearchQuery] = useState('');
 
-  // --- 核心新特性：合并视图状态与锚点跳转 ---
+  // ====== 重点修复：拖拽调整面板比例的底层逻辑 (使用 Pointer Capture API) ======
+  const [contentHeight, setContentHeight] = useState(300);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeRef = useRef({ startY: 0, startHeight: 0 });
+
+  useEffect(() => {
+    // 拖拽时修改全局光标和禁止选中，防止体验卡顿
+    if (isResizing) {
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'row-resize';
+    } else {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    }
+    return () => {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isResizing]);
+
+  const handleResizePointerDown = useCallback((e) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId); // 强制捕获指针
+    setIsResizing(true);
+    resizeRef.current = {
+      startY: e.clientY,
+      startHeight: contentHeight
+    };
+  }, [contentHeight]);
+
+  const handleResizePointerMove = useCallback((e) => {
+    if (!isResizing) return;
+    const delta = e.clientY - resizeRef.current.startY;
+    let newHeight = resizeRef.current.startHeight + delta;
+    
+    // 边界限制：最小 100px，最大为屏幕高度减去顶部和底部的一些预留空间
+    if (newHeight < 100) newHeight = 100;
+    if (newHeight > window.innerHeight - 250) newHeight = window.innerHeight - 250;
+    
+    setContentHeight(newHeight);
+  }, [isResizing]);
+
+  const handleResizePointerUp = useCallback((e) => {
+    if (!isResizing) return;
+    setIsResizing(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId); // 释放指针
+    } catch (err) {}
+  }, [isResizing]);
+  // ===========================================================================
+
+  useEffect(() => {
+    const validWorkspaces = workspaces.filter(w => w.notebookId === activeNotebookId);
+    if (validWorkspaces.length > 0 && !validWorkspaces.find(w => w.id === activeWorkspace)) {
+      setActiveWorkspace(validWorkspaces[0].id);
+    } else if (validWorkspaces.length === 0) {
+      setActiveWorkspace(null);
+    }
+  }, [activeNotebookId, workspaces]);
+
+  useEffect(() => {
+    if (activeWorkspace) {
+      const currentWsNotes = notesData.filter(n => n.workspaceId === activeWorkspace);
+      if (currentWsNotes.length > 0 && !currentWsNotes.find(n => n.id === activeNoteId)) {
+        setActiveNoteId(currentWsNotes[0].id);
+      }
+    } else {
+      setActiveNoteId(null);
+    }
+  }, [activeWorkspace, notesData]);
+
   const [isMergedView, setIsMergedView] = useState(false);
   const [scrollToNoteId, setScrollToNoteId] = useState(null);
   const [scrollToWorkspaceId, setScrollToWorkspaceId] = useState(null);
@@ -228,19 +328,17 @@ export default function App() {
   
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false);
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
-
-  const [notebooks, setNotebooks] = useState([{ id: 'nb1', name: 'Mirrorli 的笔记本' }]);
-  const [activeNotebookId, setActiveNotebookId] = useState('nb1');
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
   const [isNotebookMenuOpen, setIsNotebookMenuOpen] = useState(false);
   
   const currentNotebook = notebooks.find(nb => nb.id === activeNotebookId) || notebooks[0];
 
   useEffect(() => {
+    localStorage.setItem('my_notes_notebooks', JSON.stringify(notebooks));
     localStorage.setItem('my_notes_workspaces', JSON.stringify(workspaces));
     localStorage.setItem('my_notes_data', JSON.stringify(notesData));
-  }, [workspaces, notesData]);
+  }, [notebooks, workspaces, notesData]);
 
-  // 处理合并视图下的滚动锚点跳转
   useEffect(() => {
     if (isMergedView) {
       if (scrollToNoteId) {
@@ -333,9 +431,7 @@ export default function App() {
 
   const handleExportPDF = () => {
     setIsNoteMenuOpen(false);
-    setTimeout(() => {
-      window.print();
-    }, 100);
+    setTimeout(() => window.print(), 100);
   };
 
   const startEditing = (id, currentName) => {
@@ -348,21 +444,34 @@ export default function App() {
     if (!editingId) return;
     commitToHistory();
     const wsExists = workspaces.find(w => w.id === editingId);
+    const nbExists = notebooks.find(nb => nb.id === editingId);
+
     if (wsExists) {
       setWorkspaces(prev => prev.map(w => w.id === editingId ? { ...w, name: tempName.trim() || '未命名分区' } : w));
+    } else if (nbExists) {
+      setNotebooks(prev => prev.map(nb => nb.id === editingId ? { ...nb, name: tempName.trim() || '未命名笔记本' } : nb));
     } else {
       setNotesData(prev => prev.map(n => n.id === editingId ? { ...n, title: tempName.trim() || '无标题文档' } : n));
     }
     setEditingId(null);
   };
 
+  const createNotebook = () => {
+    const newNb = { id: `nb_${Date.now()}`, name: `新笔记本 ${notebooks.length + 1}` };
+    setNotebooks(prev => [...prev, newNb]);
+    setActiveNotebookId(newNb.id);
+    showToast(`已新建笔记本`);
+    setTimeout(() => startEditing(newNb.id, newNb.name), 100);
+  };
+
   const createWorkspace = () => {
     commitToHistory();
     const newWs = { 
       id: `ws_${Date.now()}`, 
-      name: `新公司/项目 ${workspaces.length + 1}`, 
+      name: `新公司/项目 ${currentNotebookWorkspaces.length + 1}`, 
       iconType: 'building', 
-      sortOrder: 'time' 
+      sortOrder: 'time',
+      notebookId: activeNotebookId
     };
     setWorkspaces(prev => [...prev, newWs]);
     setActiveWorkspace(newWs.id);
@@ -400,10 +509,7 @@ export default function App() {
   };
 
   const handleWorkspaceDragStart = (e, wsId) => {
-    if (editingId === wsId) {
-      e.preventDefault();
-      return;
-    }
+    if (editingId === wsId) { e.preventDefault(); return; }
     setDraggedWorkspaceId(wsId);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('dragType', 'workspace');
@@ -450,12 +556,10 @@ export default function App() {
   };
 
   const createNewNote = (wsId = activeWorkspace) => {
+    if (!wsId) { showToast('请先新建一个分区'); return; }
     commitToHistory();
     const newNote = {
-      id: `n_${Date.now()}`,
-      workspaceId: wsId,
-      title: '', content: '', updatedAt: '刚刚', createdAt: Date.now(),
-      isPinned: false, tasks: []
+      id: `n_${Date.now()}`, workspaceId: wsId, title: '', content: '', updatedAt: '刚刚', createdAt: Date.now(), isPinned: false, tasks: []
     };
     setNotesData(prev => [newNote, ...(prev || [])]);
     setActiveNoteId(newNote.id);
@@ -524,10 +628,10 @@ export default function App() {
       const tasks = [...(note.tasks || [])];
       const index = tasks.findIndex(t => t.id === taskId);
       if (index === -1) return note;
+      
       const newIndex = index + direction;
       if (newIndex < 0 || newIndex >= tasks.length) return note;
       
-      // 交换任务位置
       [tasks[index], tasks[newIndex]] = [tasks[newIndex], tasks[index]];
       return { ...note, updatedAt: '刚刚', tasks };
     }));
@@ -535,10 +639,6 @@ export default function App() {
 
   const safeNotesData = Array.isArray(notesData) ? notesData : [];
   const currentNote = safeNotesData.find(n => n.id === activeNoteId);
-
-  const allPendingTasks = safeNotesData
-    .flatMap(note => (note.tasks || []).filter(t => !t.completed).map(t => ({ ...t, noteTitle: note.title || '无标题文档', workspaceId: note.workspaceId, noteId: note.id })))
-    .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
 
   const getSortedNotes = (wsId) => {
     const ws = workspaces.find(w => w.id === wsId);
@@ -564,11 +664,10 @@ export default function App() {
     return notes;
   };
 
-  const filteredWorkspaces = workspaces.filter(ws => {
+  const filteredWorkspaces = currentNotebookWorkspaces.filter(ws => {
     if (!searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase();
     if (ws.name.toLowerCase().includes(query)) return true;
-    
     const hasMatchingNotes = safeNotesData.some(n => n.workspaceId === ws.id && (
       (n.title && n.title.toLowerCase().includes(query)) ||
       (n.content && n.content.toLowerCase().includes(query)) ||
@@ -576,6 +675,12 @@ export default function App() {
     ));
     return hasMatchingNotes;
   });
+
+  const currentWsIds = currentNotebookWorkspaces.map(w => w.id);
+  const allPendingTasks = safeNotesData
+    .filter(n => currentWsIds.includes(n.workspaceId))
+    .flatMap(note => (note.tasks || []).filter(t => !t.completed).map(t => ({ ...t, noteTitle: note.title || '无标题文档', workspaceId: note.workspaceId, noteId: note.id })))
+    .sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
 
   return (
     <div 
@@ -585,15 +690,23 @@ export default function App() {
       onTouchEnd={handleTouchEnd}
     >
       
+      {/* 注入全局纤细滚动条样式 */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      `}} />
+
       {/* 撤销提示 Toast */}
-      <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-5 py-2.5 rounded-full shadow-lg text-sm z-[200] transition-all duration-300 print:hidden ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+      <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-5 py-2.5 rounded-full shadow-lg text-sm z-[300] transition-all duration-300 print:hidden ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
         {toastMessage}
       </div>
 
       {/* 自定义右键菜单层 */}
       {contextMenu && (
         <div 
-          className="fixed bg-white border border-slate-200 rounded-lg shadow-xl z-[300] py-1.5 w-48 text-sm print:hidden"
+          className="fixed bg-white border border-slate-200 rounded-lg shadow-xl z-[400] py-1.5 w-48 text-sm print:hidden"
           style={{ left: Math.min(contextMenu.x, window.innerWidth - 200), top: Math.min(contextMenu.y, window.innerHeight - 250) }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -674,7 +787,7 @@ export default function App() {
                 <ChevronRight size={14} />
                 {subMenu === 'move' && (
                   <div className="absolute left-full top-0 w-40 bg-white border border-slate-200 rounded-lg shadow-xl py-1.5 ml-1">
-                    {workspaces.map(ws => (
+                    {currentNotebookWorkspaces.map(ws => (
                       <div key={ws.id} className="px-3 py-2 text-slate-700 hover:bg-slate-50 cursor-pointer truncate" onClick={() => { moveNoteToWorkspace(contextMenu.targetId, ws.id); setContextMenu(null); }}>{ws.name}</div>
                     ))}
                   </div>
@@ -706,9 +819,9 @@ export default function App() {
               className="flex items-center gap-2 mb-4 cursor-pointer hover:bg-slate-200 p-1.5 rounded-md transition-colors"
             >
               <div className="w-6 h-6 rounded bg-blue-600 text-white flex items-center justify-center text-sm font-medium shrink-0">
-                {currentNotebook.name.charAt(0).toUpperCase()}
+                {currentNotebook?.name.charAt(0).toUpperCase()}
               </div>
-              <span className="font-medium text-sm flex-1 truncate">{currentNotebook.name}</span>
+              <span className="font-medium text-sm flex-1 truncate">{currentNotebook?.name}</span>
               <ChevronDown size={14} className={`text-slate-500 shrink-0 transition-transform ${isNotebookMenuOpen ? 'rotate-180' : ''}`} />
             </div>
 
@@ -720,13 +833,41 @@ export default function App() {
                   {notebooks.map(nb => (
                     <div
                       key={nb.id}
-                      onClick={() => { setActiveNotebookId(nb.id); setIsNotebookMenuOpen(false); }}
+                      onClick={(e) => { 
+                        e.stopPropagation();
+                        if (activeNotebookId === nb.id && editingId !== nb.id) {
+                          startEditing(nb.id, nb.name);
+                        } else {
+                          setActiveNotebookId(nb.id); 
+                          setIsNotebookMenuOpen(false); 
+                        }
+                      }}
                       className={`px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 flex items-center gap-2 ${activeNotebookId === nb.id ? 'text-blue-600 font-medium' : 'text-slate-700'}`}
                     >
                       <div className="w-5 h-5 rounded bg-slate-100 flex items-center justify-center text-xs text-slate-500 shrink-0">{nb.name.charAt(0).toUpperCase()}</div>
-                      <span className="truncate flex-1">{nb.name}</span>
+                      
+                      {editingId === nb.id ? (
+                        <input 
+                          autoFocus 
+                          value={tempName} 
+                          onChange={e => setTempName(e.target.value)} 
+                          onBlur={saveRename} 
+                          onKeyDown={e => { if (e.key === 'Enter') { saveRename(); setIsNotebookMenuOpen(false); } if (e.key === 'Escape') setEditingId(null); }}
+                          onClick={e => e.stopPropagation()}
+                          className="bg-white border border-blue-500 rounded px-1 w-full outline-none text-slate-800 font-normal"
+                        />
+                      ) : (
+                        <span className="truncate flex-1">{nb.name}</span>
+                      )}
                     </div>
                   ))}
+                  <div className="h-px bg-slate-100 my-1"></div>
+                  <div 
+                    onClick={(e) => { e.stopPropagation(); createNotebook(); }}
+                    className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 cursor-pointer flex items-center gap-2 transition-colors"
+                  >
+                    <Plus size={14} /> 新建笔记本...
+                  </div>
                 </div>
               </>
             )}
@@ -744,7 +885,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-2 px-1 pb-10">
+        <div className="flex-1 overflow-y-auto py-2 px-1 pb-10 custom-scrollbar">
           {filteredWorkspaces.map(ws => {
             const IconComponent = IconMap[ws.iconType] || FolderPlus;
             const isNoteDragOver = draggedNoteId && safeNotesData.find(n => n.id === draggedNoteId)?.workspaceId !== ws.id;
@@ -814,9 +955,7 @@ export default function App() {
                           } else {
                             setActiveWorkspace(ws.id);
                             setActiveNoteId(note.id);
-                            if (isMergedView) {
-                              setScrollToNoteId(note.id);
-                            }
+                            if (isMergedView) setScrollToNoteId(note.id);
                             if (!isMergedView) setIsLeftSidebarOpen(false); 
                           }
                         }}
@@ -879,7 +1018,6 @@ export default function App() {
             {!isMergedView && <div className="text-xs text-slate-400 hidden sm:block">最后更新于 {currentNote?.updatedAt || '刚刚'}</div>}
           </div>
           <div className="flex items-center gap-1 md:gap-2">
-            {/* 图标化 撤销按键 */}
             <button 
               onClick={handleUndo}
               title="撤销 (Ctrl+Z)"
@@ -889,7 +1027,6 @@ export default function App() {
               <Undo size={18} />
             </button>
 
-            {/* 图标化 保存按键 */}
             <button 
               onClick={() => {
                 if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
@@ -905,7 +1042,6 @@ export default function App() {
             
             <div className="w-px h-4 bg-slate-200 mx-1"></div>
 
-            {/* --- 新增：合并视图切换按钮 --- */}
             <button 
               onClick={() => setIsMergedView(!isMergedView)} 
               title={isMergedView ? "退出全局长文模式" : "合并视图 (全局长文模式)"}
@@ -953,165 +1089,170 @@ export default function App() {
           </div>
         </div>
 
-        {/* 编辑区容器 */}
-        <div className="flex-1 overflow-y-auto px-5 py-6 md:px-12 md:py-12 max-w-4xl mx-auto w-full print:w-full print:max-w-full print:overflow-visible print:p-0">
-          
-          {/* ========== 模式A：合并长文模式 ========== */}
-          {isMergedView && workspaces.map(ws => (
-            <div key={ws.id} id={`workspace-${ws.id}`} className="mb-24 print:break-after-page">
-              {/* 可编辑的公司级大标题 */}
-              <AutoResizeTextarea
-                value={ws.name}
-                onChange={e => updateWorkspaceField(ws.id, 'name', e.target.value)}
-                onFocus={handleTextFocus} 
-                onBlur={handleTextBlur}
-                className="w-full text-4xl md:text-5xl font-black text-slate-800 border-none outline-none mb-10 bg-transparent print:text-black break-words"
-                placeholder="公司/分区名称"
-              />
-              
-              {getSortedNotes(ws.id).length === 0 && (
-                <div className="text-slate-400 italic mb-8">此分区下暂无文档...</div>
-              )}
+        {/* ========== 模式A：合并长文模式 ========== */}
+        {isMergedView && (
+          <div className="flex-1 overflow-y-auto px-5 py-6 md:px-12 md:py-12 max-w-4xl mx-auto w-full custom-scrollbar print:w-full print:max-w-full print:overflow-visible print:p-0">
+            {currentNotebookWorkspaces.map(ws => (
+              <div key={ws.id} id={`workspace-${ws.id}`} className="mb-24 print:break-after-page">
+                <AutoResizeTextarea
+                  value={ws.name}
+                  onChange={e => updateWorkspaceField(ws.id, 'name', e.target.value)}
+                  onFocus={handleTextFocus} 
+                  onBlur={handleTextBlur}
+                  className="w-full text-4xl md:text-5xl font-black text-slate-800 border-none outline-none mb-10 bg-transparent print:text-black break-words"
+                  placeholder="公司/分区名称"
+                />
+                
+                {getSortedNotes(ws.id).length === 0 && (
+                  <div className="text-slate-400 italic mb-8">此分区下暂无文档...</div>
+                )}
 
-              {getSortedNotes(ws.id).map(note => (
-                <div key={note.id} id={`note-${note.id}`} className="mb-16 pb-12 border-b border-slate-100 last:border-0 print:break-inside-avoid">
-                  <AutoResizeTextarea 
-                    value={note.title} 
-                    onChange={(e) => updateNoteField(note.id, 'title', e.target.value)}
-                    onFocus={handleTextFocus} onBlur={handleTextBlur}
-                    className="w-full text-2xl md:text-3xl font-semibold text-slate-800 border-none outline-none mb-6 bg-transparent placeholder-slate-300 print:text-black print:mb-4 break-words" 
-                    placeholder="无标题文档"
-                  />
-                  <AutoResizeTextarea 
-                    value={note.content} onChange={(e) => updateNoteField(note.id, 'content', e.target.value)}
-                    onFocus={handleTextFocus} onBlur={handleTextBlur}
-                    className="w-full min-h-[100px] text-base md:text-lg text-slate-600 leading-relaxed outline-none bg-transparent mb-8 print:text-black" 
-                    placeholder="在这里记录想法、会议纪要或需求细节..."
-                  />
+                {getSortedNotes(ws.id).map(note => (
+                  <div key={note.id} id={`note-${note.id}`} className="mb-16 pb-12 border-b border-slate-100 last:border-0 print:break-inside-avoid">
+                    <AutoResizeTextarea 
+                      value={note.title} 
+                      onChange={(e) => updateNoteField(note.id, 'title', e.target.value)}
+                      onFocus={handleTextFocus} onBlur={handleTextBlur}
+                      className="w-full text-2xl md:text-3xl font-semibold text-slate-800 border-none outline-none mb-6 bg-transparent placeholder-slate-300 print:text-black print:mb-4 break-words" 
+                      placeholder="无标题文档"
+                    />
+                    <AutoResizeTextarea 
+                      value={note.content} onChange={(e) => updateNoteField(note.id, 'content', e.target.value)}
+                      onFocus={handleTextFocus} onBlur={handleTextBlur}
+                      className="w-full min-h-[100px] text-base md:text-lg text-slate-600 leading-relaxed outline-none bg-transparent mb-8 print:text-black" 
+                      placeholder="在这里记录想法、会议纪要或需求细节..."
+                    />
 
-                  {/* 任务清单 (内联显示) */}
-                  <div className="mt-8 pb-4 print:break-inside-avoid">
-                    <div className="flex items-center gap-2 mb-4 text-slate-800 font-medium"><CheckCircle2 size={18} className="text-slate-400 print:text-black" /><span>任务清单 (To-Do)</span></div>
-                    <div className="space-y-2">
-                      {(note.tasks || []).map((task, index) => (
-                        <div key={task.id} className="flex items-center group gap-2 md:gap-3 p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all print:border-none print:p-1">
-                          <button onClick={() => toggleTask(note.id, task.id)} className="focus:outline-none shrink-0 print:hidden">
-                            {task.completed ? <CheckCircle2 size={18} className="text-blue-500" /> : <Circle size={18} className="text-slate-300 group-hover:text-slate-400" />}
-                          </button>
-                          <span className="hidden print:inline-block shrink-0 mr-2 text-slate-800">
-                            {task.completed ? '[ x ]' : '[   ]'}
-                          </span>
-                          <AutoResizeTextarea 
-                            value={task.text} onChange={(e) => updateTaskText(note.id, task.id, e.target.value)}
-                            onFocus={handleTextFocus} onBlur={handleTextBlur}
-                            className={`flex-1 bg-transparent border-none outline-none text-sm ${task.completed ? 'text-slate-400 line-through print:text-slate-500' : 'text-slate-700 print:text-black'}`}
-                          />
-                          <div className="relative flex items-center gap-1 px-1.5 py-1 md:gap-1.5 md:px-2 bg-slate-100 rounded text-xs text-slate-500 cursor-pointer hover:bg-slate-200 transition-colors shrink-0 print:bg-transparent print:text-slate-800" onPointerDown={e => e.stopPropagation()}>
-                            <Calendar size={12} className="print:hidden pointer-events-none"/> 
-                            <span className="pointer-events-none">{task.deadline.slice(5)}</span>
-                            <input 
-                              type="date"
-                              value={task.deadline}
-                              onChange={(e) => updateTaskDeadline(note.id, task.id, e.target.value)}
-                              onClick={(e) => { try { e.target.showPicker(); } catch(err) {} }}
-                              className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
+                    {/* 任务清单 (合并视图) */}
+                    <div className="mt-8 pb-4 print:break-inside-avoid">
+                      <div className="flex items-center gap-2 mb-4 text-slate-800 font-medium"><CheckCircle2 size={18} className="text-slate-400 print:text-black" /><span>任务清单 (To-Do)</span></div>
+                      <div className="space-y-2">
+                        {(note.tasks || []).map((task, index) => (
+                          <div key={task.id} className="flex items-center group gap-2 md:gap-3 p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all print:border-none print:p-1">
+                            <button onClick={() => toggleTask(note.id, task.id)} className="focus:outline-none shrink-0 print:hidden">
+                              {task.completed ? <CheckCircle2 size={18} className="text-blue-500" /> : <Circle size={18} className="text-slate-300 group-hover:text-slate-400" />}
+                            </button>
+                            <span className="hidden print:inline-block shrink-0 mr-2 text-slate-800">
+                              {task.completed ? '[ x ]' : '[   ]'}
+                            </span>
+                            <AutoResizeTextarea 
+                              value={task.text} onChange={(e) => updateTaskText(note.id, task.id, e.target.value)}
+                              onFocus={handleTextFocus} onBlur={handleTextBlur}
+                              className={`flex-1 bg-transparent border-none outline-none text-sm ${task.completed ? 'text-slate-400 line-through print:text-slate-500' : 'text-slate-700 print:text-black'}`}
                             />
+                            <DatePickerButton 
+                              value={task.deadline}
+                              onChange={(newDate) => updateTaskDeadline(note.id, task.id, newDate)}
+                              className="flex items-center gap-1 px-1.5 py-1 md:gap-1.5 md:px-2 bg-slate-100 rounded text-xs text-slate-500 hover:bg-slate-200 transition-colors shrink-0 print:bg-transparent print:text-slate-800"
+                            />
+                            
+                            {/* 手机端常驻显示排序按钮，并阻断事件冒泡防止激活输入框 */}
+                            <div className="flex items-center gap-0.5 shrink-0 print:hidden ml-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-slate-400">
+                              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveTask(note.id, task.id, -1); }} disabled={index === 0} className="p-1.5 hover:text-blue-500 disabled:opacity-20 rounded transition-all"><ChevronUp size={16} /></button>
+                              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveTask(note.id, task.id, 1); }} disabled={index === (note.tasks || []).length - 1} className="p-1.5 hover:text-blue-500 disabled:opacity-20 rounded transition-all"><ChevronDownIcon size={16} /></button>
+                              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteTask(note.id, task.id); }} className="p-1.5 hover:text-red-500 hover:bg-red-50 rounded transition-all"><Trash2 size={16} /></button>
+                            </div>
                           </div>
-                          
-                          {/* 隐藏的移动与删除按钮组 */}
-                          <div className="opacity-0 md:group-hover:opacity-100 flex items-center gap-0.5 shrink-0 print:hidden transition-opacity ml-1">
-                            <button onClick={() => moveTask(note.id, task.id, -1)} disabled={index === 0} className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-20 rounded transition-all"><ChevronUp size={14} /></button>
-                            <button onClick={() => moveTask(note.id, task.id, 1)} disabled={index === (note.tasks || []).length - 1} className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-20 rounded transition-all"><ChevronDown size={14} /></button>
-                            <button onClick={() => deleteTask(note.id, task.id)} className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all"><Trash2 size={14} /></button>
-                          </div>
+                        ))}
+                        
+                        <div className="flex items-center gap-3 p-2 text-slate-400 mt-2 hover:bg-slate-50 rounded-lg transition-colors print:hidden">
+                          <button onClick={() => addTask(note.id)} className="hover:text-blue-500 transition-colors focus:outline-none shrink-0" title="点击添加"><Plus size={18} /></button>
+                          <input 
+                            type="text" value={newTaskText} onChange={(e) => setNewTaskText(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addTask(note.id); } }}
+                            placeholder="输入完毕按 Enter 添加新待办..." className="bg-transparent border-none outline-none flex-1 text-sm text-slate-700 placeholder-slate-400"
+                          />
                         </div>
-                      ))}
-                      
-                      <div className="flex items-center gap-3 p-2 text-slate-400 mt-2 hover:bg-slate-50 rounded-lg transition-colors print:hidden">
-                        <button onClick={() => addTask(note.id)} className="hover:text-blue-500 transition-colors focus:outline-none shrink-0" title="点击添加"><Plus size={18} /></button>
-                        <input 
-                          type="text" value={newTaskText} onChange={(e) => setNewTaskText(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addTask(note.id); } }}
-                          placeholder="输入完毕按 Enter 添加新待办..." className="bg-transparent border-none outline-none flex-1 text-sm text-slate-700 placeholder-slate-400"
-                        />
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ))}
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
-          {/* ========== 模式B：单文档常规模式 ========== */}
-          {!isMergedView && currentNote ? (
-            <>
+        {/* ========== 模式B：单文档常规模式 (还原独立的滚动条与区隔) ========== */}
+        {!isMergedView && currentNote ? (
+          <div className="flex-1 flex flex-col min-h-0 max-w-4xl mx-auto w-full print:w-full print:max-w-full print:overflow-visible print:p-0">
+            
+            {/* 上部分：正文白板区 (带有独立滚动条，高度动态可调) */}
+            <div className="flex flex-col px-5 pt-6 md:px-12 md:pt-10 shrink-0 print:h-auto" style={{ height: `${contentHeight}px` }}>
               <AutoResizeTextarea 
                 value={currentNote.title} onChange={(e) => updateNoteField(currentNote.id, 'title', e.target.value)}
                 onFocus={handleTextFocus} onBlur={handleTextBlur}
-                className="w-full text-2xl md:text-3xl font-semibold text-slate-800 border-none outline-none mb-6 bg-transparent placeholder-slate-300 print:text-black print:mb-4 break-words" placeholder="无标题文档"
+                className="shrink-0 w-full text-2xl md:text-3xl font-semibold text-slate-800 border-none outline-none mb-6 bg-transparent placeholder-slate-300 print:text-black print:mb-4 break-words" placeholder="无标题文档"
               />
-              <AutoResizeTextarea 
+              <textarea 
                 value={currentNote.content} onChange={(e) => updateNoteField(currentNote.id, 'content', e.target.value)}
                 onFocus={handleTextFocus} onBlur={handleTextBlur}
-                className="w-full min-h-[300px] text-base md:text-lg text-slate-600 leading-relaxed outline-none bg-transparent mb-8 print:text-black print:min-h-0" placeholder="在这里记录想法、会议纪要或需求细节..."
+                className="flex-1 min-h-0 overflow-y-auto w-full text-base md:text-lg text-slate-600 leading-relaxed resize-none outline-none bg-transparent custom-scrollbar print:text-black print:h-auto print:overflow-visible" 
+                placeholder="在这里记录想法、会议纪要或需求细节..."
               />
+            </div>
 
-              <div className="mt-8 pb-10 md:pb-0 print:break-inside-avoid">
-                <div className="flex items-center gap-2 mb-4 text-slate-800 font-medium"><CheckCircle2 size={18} className="text-slate-400 print:text-black" /><span>任务清单 (To-Do)</span></div>
-                <div className="space-y-2">
-                  {(currentNote.tasks || []).map((task, index) => (
-                    <div key={task.id} className="flex items-center group gap-2 md:gap-3 p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all print:border-none print:p-1">
-                      <button onClick={() => toggleTask(currentNote.id, task.id)} className="focus:outline-none shrink-0 print:hidden">
-                        {task.completed ? <CheckCircle2 size={18} className="text-blue-500" /> : <Circle size={18} className="text-slate-300 group-hover:text-slate-400" />}
-                      </button>
-                      <span className="hidden print:inline-block shrink-0 mr-2 text-slate-800">
-                        {task.completed ? '[ x ]' : '[   ]'}
-                      </span>
-                      <AutoResizeTextarea 
-                        value={task.text} onChange={(e) => updateTaskText(currentNote.id, task.id, e.target.value)}
-                        onFocus={handleTextFocus} onBlur={handleTextBlur}
-                        className={`flex-1 bg-transparent border-none outline-none text-sm ${task.completed ? 'text-slate-400 line-through print:text-slate-500' : 'text-slate-700 print:text-black'}`}
-                      />
-                      <div className="relative flex items-center gap-1 px-1.5 py-1 md:gap-1.5 md:px-2 bg-slate-100 rounded text-xs text-slate-500 cursor-pointer hover:bg-slate-200 transition-colors shrink-0 print:bg-transparent print:text-slate-800" onPointerDown={e => e.stopPropagation()}>
-                        <Calendar size={12} className="print:hidden pointer-events-none"/> 
-                        <span className="pointer-events-none">{task.deadline.slice(5)}</span>
-                        <input 
-                          type="date"
-                          value={task.deadline}
-                          onChange={(e) => updateTaskDeadline(currentNote.id, task.id, e.target.value)}
-                          onClick={(e) => { try { e.target.showPicker(); } catch(err) {} }}
-                          className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
-                        />
-                      </div>
+            {/* 可拖拽调整高度的分割线 */}
+            <div 
+              className={`py-2 -my-2 flex items-center justify-center cursor-row-resize group print:hidden relative z-10 mx-5 md:mx-12 shrink-0 ${isResizing ? 'bg-slate-50/50' : ''}`}
+              onPointerDown={handleResizePointerDown}
+              onPointerMove={handleResizePointerMove}
+              onPointerUp={handleResizePointerUp}
+              onPointerCancel={handleResizePointerUp}
+              title="上下拖动调整面板大小"
+            >
+              <div className={`w-full h-px transition-colors ${isResizing ? 'bg-blue-400' : 'bg-slate-100 group-hover:bg-blue-300'}`} />
+              <div className={`absolute w-8 h-1 rounded-full transition-colors ${isResizing ? 'bg-blue-500' : 'bg-slate-200 group-hover:bg-blue-400'}`} />
+            </div>
 
-                      {/* 隐藏的移动与删除按钮组 */}
-                      <div className="opacity-0 md:group-hover:opacity-100 flex items-center gap-0.5 shrink-0 print:hidden transition-opacity ml-1">
-                        <button onClick={() => moveTask(currentNote.id, task.id, -1)} disabled={index === 0} className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-20 rounded transition-all"><ChevronUp size={14} /></button>
-                        <button onClick={() => moveTask(currentNote.id, task.id, 1)} disabled={index === (currentNote.tasks || []).length - 1} className="p-1 text-slate-400 hover:text-blue-500 disabled:opacity-20 rounded transition-all"><ChevronDown size={14} /></button>
-                        <button onClick={() => deleteTask(currentNote.id, task.id)} className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all"><Trash2 size={14} /></button>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  <div className="flex items-center gap-3 p-2 text-slate-400 mt-2 hover:bg-slate-50 rounded-lg transition-colors print:hidden">
-                    <button onClick={() => addTask(currentNote.id)} className="hover:text-blue-500 transition-colors focus:outline-none shrink-0" title="点击添加"><Plus size={18} /></button>
-                    <input 
-                      type="text" value={newTaskText} onChange={(e) => setNewTaskText(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addTask(currentNote.id); } }}
-                      placeholder="输入完毕按 Enter 添加新待办..." className="bg-transparent border-none outline-none flex-1 text-sm text-slate-700 placeholder-slate-400"
+            {/* 下部分：任务清单区 (占据剩余高度，带独立滚动条) */}
+            <div className="flex-1 min-h-[150px] overflow-y-auto custom-scrollbar px-5 md:px-12 pt-6 pb-10 md:pb-6 print:break-inside-avoid print:overflow-visible">
+              <div className="flex items-center gap-2 mb-4 text-slate-800 font-medium"><CheckCircle2 size={18} className="text-slate-400 print:text-black" /><span>任务清单 (To-Do)</span></div>
+              <div className="space-y-2">
+                {(currentNote.tasks || []).map((task, index) => (
+                  <div key={task.id} className="flex items-center group gap-2 md:gap-3 p-2 hover:bg-slate-50 rounded-lg border border-transparent hover:border-slate-100 transition-all print:border-none print:p-1">
+                    <button onClick={() => toggleTask(currentNote.id, task.id)} className="focus:outline-none shrink-0 print:hidden">
+                      {task.completed ? <CheckCircle2 size={18} className="text-blue-500" /> : <Circle size={18} className="text-slate-300 group-hover:text-slate-400" />}
+                    </button>
+                    <span className="hidden print:inline-block shrink-0 mr-2 text-slate-800">
+                      {task.completed ? '[ x ]' : '[   ]'}
+                    </span>
+                    <AutoResizeTextarea 
+                      value={task.text} onChange={(e) => updateTaskText(currentNote.id, task.id, e.target.value)}
+                      onFocus={handleTextFocus} onBlur={handleTextBlur}
+                      className={`flex-1 bg-transparent border-none outline-none text-sm ${task.completed ? 'text-slate-400 line-through print:text-slate-500' : 'text-slate-700 print:text-black'}`}
                     />
+                    <DatePickerButton 
+                      value={task.deadline}
+                      onChange={(newDate) => updateTaskDeadline(currentNote.id, task.id, newDate)}
+                      className="flex items-center gap-1 px-1.5 py-1 md:gap-1.5 md:px-2 bg-slate-100 rounded text-xs text-slate-500 hover:bg-slate-200 transition-colors shrink-0 print:bg-transparent print:text-slate-800"
+                    />
+
+                    {/* 手机端常驻显示，电脑端悬停显示，并拦截冒泡 */}
+                    <div className="flex items-center gap-0.5 shrink-0 print:hidden ml-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-slate-400">
+                      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveTask(currentNote.id, task.id, -1); }} disabled={index === 0} className="p-1.5 hover:text-blue-500 disabled:opacity-20 rounded transition-all"><ChevronUp size={16} /></button>
+                      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); moveTask(currentNote.id, task.id, 1); }} disabled={index === (currentNote.tasks || []).length - 1} className="p-1.5 hover:text-blue-500 disabled:opacity-20 rounded transition-all"><ChevronDownIcon size={16} /></button>
+                      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteTask(currentNote.id, task.id); }} className="p-1.5 hover:text-red-500 hover:bg-red-50 rounded transition-all"><Trash2 size={16} /></button>
+                    </div>
                   </div>
+                ))}
+                
+                <div className="flex items-center gap-3 p-2 text-slate-400 mt-2 hover:bg-slate-50 rounded-lg transition-colors print:hidden">
+                  <button onClick={() => addTask(currentNote.id)} className="hover:text-blue-500 transition-colors focus:outline-none shrink-0" title="点击添加"><Plus size={18} /></button>
+                  <input 
+                    type="text" value={newTaskText} onChange={(e) => setNewTaskText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addTask(currentNote.id); } }}
+                    placeholder="输入完毕按 Enter 添加新待办..." className="bg-transparent border-none outline-none flex-1 text-sm text-slate-700 placeholder-slate-400"
+                  />
                 </div>
               </div>
-            </>
-          ) : !isMergedView && (
-            <div className="flex-1 flex items-center justify-center text-slate-400 relative print:hidden">
-              <button onClick={() => setIsLeftSidebarOpen(true)} className="absolute top-4 left-4 md:hidden p-2 bg-slate-100 rounded-lg"><Menu size={20}/></button>
-              左侧还没有文档，点击「新建文档...」开始记录
             </div>
-          )}
-
-        </div>
+          </div>
+        ) : !isMergedView && (
+          <div className="flex-1 flex items-center justify-center text-slate-400 relative print:hidden">
+            <button onClick={() => setIsLeftSidebarOpen(true)} className="absolute top-4 left-4 md:hidden p-2 bg-slate-100 rounded-lg"><Menu size={20}/></button>
+            左侧还没有文档，点击「新建文档...」开始记录
+          </div>
+        )}
       </div>
 
       {/* --- 手机端抽屉遮罩 (右) --- */}
@@ -1122,26 +1263,51 @@ export default function App() {
         />
       )}
 
-      {/* 右侧提醒栏 (开启合并视图时，完全隐藏右侧提醒栏以获得沉浸体验) */}
+      {/* 右侧提醒栏 (增加电脑端收缩隐藏功能) */}
       {!isMergedView && (
-        <div 
-          className={`absolute inset-y-0 right-0 md:relative flex-shrink-0 w-80 bg-slate-50 border-l border-slate-200 flex flex-col shadow-[inset_1px_0_0_0_rgba(0,0,0,0.02)] z-50 transform transition-transform duration-300 print:hidden ${isRightSidebarOpen ? 'translate-x-0 shadow-[0_0_40px_rgba(0,0,0,0.1)]' : 'translate-x-full'} md:translate-x-0 md:shadow-none`}
-        >
-          <div className="p-5 border-b border-slate-200 flex items-center gap-2 bg-white z-10 shrink-0">
-            <Bell size={18} className="text-blue-600" />
-            <span className="font-semibold text-slate-800 text-sm">即将到来 (提醒)</span>
-            <span className="ml-auto bg-blue-100 text-blue-700 text-xs py-0.5 px-2 rounded-full font-medium">{allPendingTasks.length}</span>
+        <>
+          <div 
+            className={`absolute inset-y-0 right-0 md:relative flex-shrink-0 bg-slate-50 border-l border-slate-200 flex flex-col shadow-[inset_1px_0_0_0_rgba(0,0,0,0.02)] z-50 transition-all duration-300 print:hidden 
+            ${isRightSidebarOpen ? 'translate-x-0 w-80 shadow-[0_0_40px_rgba(0,0,0,0.1)]' : 'translate-x-full md:translate-x-0 w-80'} 
+            ${isRightSidebarCollapsed ? 'md:w-0 md:border-none md:opacity-0 md:overflow-hidden' : 'md:w-80'}
+            `}
+          >
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-white z-10 shrink-0">
+              <div className="flex items-center gap-2">
+                <Bell size={18} className="text-blue-600" />
+                <span className="font-semibold text-slate-800 text-sm">即将到来</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="bg-blue-100 text-blue-700 text-xs py-0.5 px-2 rounded-full font-medium">{allPendingTasks.length}</span>
+                {/* 电脑端收起按钮 */}
+                <button onClick={() => setIsRightSidebarCollapsed(true)} className="hidden md:flex p-1 text-slate-400 hover:bg-slate-100 rounded-md transition-colors" title="收起提醒侧栏">
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-10 custom-scrollbar">
+              {allPendingTasks.length > 0 ? (
+                allPendingTasks.map(task => (
+                  <SwipeableTask key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onUpdateDeadline={updateTaskDeadline} isUrgent={task.deadline === new Date().toISOString().split('T')[0]} />
+                ))
+              ) : (
+                <div className="text-center text-slate-400 text-sm py-10">太棒了！所有任务已清空 🎉</div>
+              )}
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-10">
-          {allPendingTasks.length > 0 ? (
-            allPendingTasks.map(task => (
-              <SwipeableTask key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onUpdateDeadline={updateTaskDeadline} isUrgent={task.deadline === new Date().toISOString().split('T')[0]} />
-            ))
-          ) : (
-            <div className="text-center text-slate-400 text-sm py-10">太棒了！所有任务已清空 🎉</div>
-            )}
-          </div>
-        </div>
+
+          {/* 侧栏收缩后悬浮在边缘的精致小铃铛 */}
+          {isRightSidebarCollapsed && (
+            <button 
+              onClick={() => setIsRightSidebarCollapsed(false)}
+              className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 bg-white border border-slate-200 border-r-0 shadow-[0_4px_20px_rgba(0,0,0,0.08)] rounded-l-xl p-2 flex-col items-center gap-2 z-40 hover:bg-slate-50 transition-colors group"
+              title="展开提醒中心"
+            >
+              <Bell size={18} className="text-blue-500 group-hover:animate-bounce" />
+              <span className="bg-blue-100 text-blue-600 text-xs px-1.5 py-0.5 rounded-full font-bold">{allPendingTasks.length}</span>
+            </button>
+          )}
+        </>
       )}
     </div>
   );
